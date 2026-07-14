@@ -22,6 +22,14 @@ const API_BASE: string =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:3000';
 
 const FETCH_TIMEOUT_MS = 5000;
+/** The demo call includes a server-side x402 payment (sign + verify + settle). */
+const DEMO_TIMEOUT_MS = 30_000;
+
+/** Explorer base URL per backend network name (from GET /api/currencies). */
+export const EXPLORERS: Record<string, string> = {
+  celo: 'https://celoscan.io',
+  'celo-sepolia': 'https://celo-sepolia.blockscout.com',
+};
 
 // ---------------------------------------------------------------------------
 // Embedded mock data (same shape as the API) — used when backend is offline
@@ -83,13 +91,18 @@ async function fetchJson<T>(path: string): Promise<T> {
   }
 }
 
-export async function getCurrencies(): Promise<ApiResult<Currency[]>> {
+export interface CurrenciesResult extends ApiResult<Currency[]> {
+  /** Backend network name ("celo" | "celo-sepolia"), null when using mocks. */
+  network: string | null;
+}
+
+export async function getCurrencies(): Promise<CurrenciesResult> {
   try {
-    const json = await fetchJson<{ currencies: Currency[] }>('/api/currencies');
+    const json = await fetchJson<{ currencies: Currency[]; network?: string }>('/api/currencies');
     if (!Array.isArray(json.currencies) || json.currencies.length === 0) throw new Error('empty');
-    return { data: json.currencies, demo: false };
+    return { data: json.currencies, demo: false, network: json.network ?? null };
   } catch {
-    return { data: MOCK_CURRENCIES, demo: true };
+    return { data: MOCK_CURRENCIES, demo: true, network: null };
   }
 }
 
@@ -102,6 +115,54 @@ export async function getQuote(amount: number, to: string): Promise<ApiResult<Qu
     return { data: json, demo: false };
   } catch {
     return { data: mockQuote(amount, to), demo: true };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// F8 — demo x402 flow: POST /api/demo/quote. The backend pays its own paid
+// endpoint with a server demo wallet, so each demo quote is a real x402
+// payment without asking the visitor for a wallet. 5 quotes per IP per 24h.
+// ---------------------------------------------------------------------------
+
+export interface DemoQuote extends Quote {
+  /** On-chain settlement tx, null in dev/degraded (verify-only) mode. */
+  txHash: string | null;
+  demo: true;
+  remainingDemoQueries: number;
+}
+
+export type DemoQuoteResult =
+  | { status: 'ok'; quote: DemoQuote }
+  /** 429: this IP used its 5 demo quotes. */
+  | { status: 'limit'; retryAfterSeconds?: number }
+  /** Demo route missing/disabled/broken — caller should fall back. */
+  | { status: 'unavailable' }
+  /** 400 from the quote validation (bad amount/currency). */
+  | { status: 'invalid' };
+
+export async function getDemoQuote(amount: number, to: string): Promise<DemoQuoteResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DEMO_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}/api/demo/quote`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ amount, to }),
+      signal: controller.signal,
+    });
+    if (res.status === 429) {
+      const body = (await res.json().catch(() => null)) as { retryAfterSeconds?: number } | null;
+      return { status: 'limit', retryAfterSeconds: body?.retryAfterSeconds };
+    }
+    if (res.status === 400) return { status: 'invalid' };
+    if (!res.ok) return { status: 'unavailable' };
+    const json = (await res.json()) as DemoQuote;
+    if (typeof json.receives !== 'number' || json.demo !== true) return { status: 'unavailable' };
+    return { status: 'ok', quote: json };
+  } catch {
+    return { status: 'unavailable' };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

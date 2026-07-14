@@ -14,6 +14,7 @@ import {
   SUPPORTED_CURRENCIES,
   UnsupportedPairError,
 } from './quote.js';
+import { registerDemoRoutes } from './demo.js';
 import { clientIp, rateLimit } from './ratelimit.js';
 import type { AgentWallet } from './wallet.js';
 import { x402 } from './x402.js';
@@ -117,6 +118,17 @@ export function createApp(options: AppOptions = {}): Hono {
       throw err;
     }
   });
+
+  // F8 demo flow: the server pays its own /api/quote with DEMO_PRIVATE_KEY so
+  // the landing can offer a no-wallet demo backed by real x402 settlements.
+  if (config.demoMode) {
+    registerDemoRoutes(app, {
+      config,
+      // Self-call stays in-process (no socket): the x402 middleware above
+      // still runs on it, so demo requests go through the full 402 flow.
+      selfFetch: async (input, init) => app.request(input, init),
+    });
+  }
 
   app.get('/api/health', async (c) => {
     let blockNumber: number | null = null;

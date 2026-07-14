@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   API_BASE,
   Currency,
+  EXPLORERS,
   MOCK_CURRENCIES,
   Quote,
   getCurrencies,
+  getDemoQuote,
   getQuote,
 } from './api';
 import { Lang, dict, getInitialLang, persistLang } from './i18n';
@@ -101,16 +103,24 @@ export default function App() {
   const [amount, setAmount] = useState('50');
   const [to, setTo] = useState('KES');
   const [quote, setQuote] = useState<Quote | null>(null);
-  const [loading, setLoading] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
   const [copied, setCopied] = useState(false);
+  // F8 — x402 payment status for the widget.
+  const [payPhase, setPayPhase] = useState<'idle' | 'quoting' | 'paying'>('idle');
+  const [payment, setPayment] = useState<{ txHash: string | null; remaining: number } | null>(
+    null,
+  );
+  const [payError, setPayError] = useState<'limit' | 'failed' | null>(null);
+  const [network, setNetwork] = useState<string | null>(null);
   const resultRef = useRef<HTMLDivElement>(null);
+  const loading = payPhase !== 'idle';
 
   useEffect(() => {
     let alive = true;
-    getCurrencies().then(({ data, demo }) => {
+    getCurrencies().then(({ data, demo, network: net }) => {
       if (!alive) return;
       setCurrencies(data);
+      setNetwork(net);
       if (demo) setDemoMode(true);
     });
     return () => {
@@ -126,12 +136,35 @@ export default function App() {
 
   async function handleQuote() {
     const parsed = parseFloat(amount);
-    if (!Number.isFinite(parsed) || parsed <= 0) return;
-    setLoading(true);
-    const { data, demo } = await getQuote(parsed, to);
-    setQuote(data);
-    setDemoMode(demo);
-    setLoading(false);
+    if (!Number.isFinite(parsed) || parsed <= 0 || loading) return;
+    setPayError(null);
+    setPayment(null);
+    setPayPhase('quoting');
+    // Brief staged step so the x402 flow is legible: quoting -> paying -> result.
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    setPayPhase('paying');
+
+    // Preferred path: server-side x402 demo payment (POST /api/demo/quote).
+    const demoRes = await getDemoQuote(parsed, to);
+    if (demoRes.status === 'ok') {
+      setQuote(demoRes.quote);
+      setDemoMode(false);
+      setPayment({
+        txHash: demoRes.quote.txHash,
+        remaining: demoRes.quote.remainingDemoQueries,
+      });
+    } else if (demoRes.status === 'limit') {
+      setPayError('limit');
+      setPayPhase('idle');
+      return;
+    } else {
+      // Demo route off (dev) or broken: legacy free path with mock fallback,
+      // so the landing never looks dead.
+      const { data, demo } = await getQuote(parsed, to);
+      setQuote(data);
+      setDemoMode(demo);
+    }
+    setPayPhase('idle');
     requestAnimationFrame(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
   }
 
@@ -239,8 +272,13 @@ export default function App() {
               disabled={loading}
               className="w-full rounded-xl bg-celo py-4 text-lg font-black text-black transition hover:brightness-110 active:scale-[0.99] disabled:opacity-60"
             >
-              {loading ? t.quoting : t.quoteBtn}
+              {payPhase === 'quoting' ? t.quoting : payPhase === 'paying' ? t.paying : t.quoteBtn}
             </button>
+            {payError && (
+              <p role="alert" className="text-sm font-semibold text-red-400">
+                {payError === 'limit' ? t.demoLimitMsg : t.payFailed}
+              </p>
+            )}
           </div>
         </div>
       </section>
@@ -260,6 +298,25 @@ export default function App() {
               {quote.currency} · {t.resultFee}: {formatUsd(quote.celoFee)} · {t.resultVia} (
               {selected.stablecoin})
             </p>
+
+            {payment && (
+              <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-celo/30 bg-celo/5 px-4 py-3 text-sm">
+                <span className="font-bold text-celo">✓ {t.paidVia}</span>
+                {payment.txHash && (
+                  <a
+                    href={`${(network && EXPLORERS[network]) ?? EXPLORERS.celo}/tx/${payment.txHash}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-white underline decoration-celo/60 underline-offset-4 transition hover:text-celo"
+                  >
+                    {t.viewTx} ↗
+                  </a>
+                )}
+                <span className="text-neutral-400">
+                  {payment.remaining} {t.demoRemaining}
+                </span>
+              </div>
+            )}
 
             <h3 className="mt-8 text-lg font-bold">{t.compareTitle}</h3>
             <div className="mt-4 space-y-5">

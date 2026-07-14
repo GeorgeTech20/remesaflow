@@ -30,8 +30,15 @@ const es = {
   amountLabel: 'Enviás (USD)',
   countryLabel: 'País destino',
   quoteBtn: 'Cotizar por $0.01',
-  quoting: 'Consultando Mento…',
+  quoting: 'Cotizando…',
+  paying: 'Pagando $0.01 USDC…',
   quoteError: 'No se pudo cotizar. Probá de nuevo.',
+  paidVia: 'Pagado $0.01 USDC vía x402',
+  viewTx: 'Ver transacción',
+  demoRemaining: 'consultas demo restantes',
+  demoLimitMsg:
+    'Alcanzaste el límite de 5 consultas demo por hoy. Volvé mañana, o pagá con tu propia wallet x402 (mirá la sección para agentes).',
+  payFailed: 'No pudimos procesar el pago de la consulta. Probá de nuevo en unos minutos.',
 
   resultArrives: 'Llega a destino',
   resultRate: 'Tasa',
@@ -74,8 +81,15 @@ const en: typeof es = {
   amountLabel: 'You send (USD)',
   countryLabel: 'Destination country',
   quoteBtn: 'Quote for $0.01',
-  quoting: 'Querying Mento…',
+  quoting: 'Quoting…',
+  paying: 'Paying $0.01 USDC…',
   quoteError: 'Quote failed. Please try again.',
+  paidVia: 'Paid $0.01 USDC via x402',
+  viewTx: 'View transaction',
+  demoRemaining: 'demo queries left',
+  demoLimitMsg:
+    'You reached the 5 demo quotes limit for today. Come back tomorrow, or pay with your own x402 wallet (see the agents section).',
+  payFailed: 'We could not process the query payment. Please try again in a few minutes.',
 
   resultArrives: 'Arrives at destination',
   resultRate: 'Rate',

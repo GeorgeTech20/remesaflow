@@ -119,6 +119,13 @@ export interface AppConfig {
   attributionTag: string | undefined;
   /** API key for POST /settle on api.x402.celo.org. Missing => verify-only. */
   x402FacilitatorApiKey: string | undefined;
+  /** DEMO_MODE=true exposes POST /api/demo/quote (F8, judge-friendly flow). */
+  demoMode: boolean;
+  /**
+   * Wallet used by the demo route to pay our OWN x402 endpoint (distinct from
+   * the agent wallet, which RECEIVES the payment). Never log or serialize.
+   */
+  demoPrivateKey: string | undefined;
   /** QUOTE_ENGINE env: mock | mento | auto (default auto). */
   quoteEngine: QuoteEngineChoice;
   corsOrigin: string;
@@ -162,6 +169,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new ConfigError(`Invalid X402_ENABLED "${x402Raw}". Expected "true" or "false".`);
   }
 
+  const demoRaw = env.DEMO_MODE ?? 'false';
+  if (demoRaw !== 'true' && demoRaw !== 'false') {
+    throw new ConfigError(`Invalid DEMO_MODE "${demoRaw}". Expected "true" or "false".`);
+  }
+
   const quoteEngineRaw = env.QUOTE_ENGINE ?? 'auto';
   if (!isQuoteEngineChoice(quoteEngineRaw)) {
     throw new ConfigError(
@@ -180,6 +192,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     agentPrivateKey: env.AGENT_PRIVATE_KEY || undefined,
     attributionTag: env.ATTRIBUTION_TAG || undefined,
     x402FacilitatorApiKey: env.X402_FACILITATOR_API_KEY || undefined,
+    demoMode: demoRaw === 'true',
+    demoPrivateKey: env.DEMO_PRIVATE_KEY || undefined,
     quoteEngine: quoteEngineRaw,
     corsOrigin: env.CORS_ORIGIN || '*',
   };
