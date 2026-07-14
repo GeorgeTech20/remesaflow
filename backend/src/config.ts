@@ -41,6 +41,12 @@ export interface X402NetworkInfo {
   network: `eip155:${number}`;
 }
 
+/** ERC-8004 registries (ARQUITECTURA §4.1, from the official celo-org skill). */
+export interface Erc8004Info {
+  identityRegistry: Address;
+  reputationRegistry: Address;
+}
+
 export interface NetworkProfile {
   name: NetworkName;
   isTestnet: boolean;
@@ -53,6 +59,7 @@ export interface NetworkProfile {
   /** Mento stablecoins (all 18 decimals), keyed by current `m`-suffix symbol. */
   stablecoins: Record<string, Address>;
   x402: X402NetworkInfo;
+  erc8004: Erc8004Info;
 }
 
 // The Celo facilitator only announces mainnet (eip155:42220). We still carry
@@ -68,10 +75,14 @@ export const NETWORKS: Record<NetworkName, NetworkProfile> = {
     chainId: 11142220,
     explorer: 'https://celo-sepolia.blockscout.com',
     usdc: {
-      // NOTE: Sepolia USDC token address equals the mainnet *adapter* address.
-      // Looks odd but is what the sources say (ARQUITECTURA §1.5 / R7).
-      token: '0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B',
-      adapter: '0x4822e58de6f5e485eF90df51C41CE01721331dC0',
+      // VERIFIED ON-CHAIN 2026-07-14 (F11): the addresses the skills listed for
+      // Sepolia (token 0x2F25deB3..., adapter 0x4822e58d...) are WRONG — the
+      // token has no code on Sepolia and the adapter reverts with "Currency
+      // not in the directory" (ARQUITECTURA R7/R8, now resolved). Real values
+      // read from FeeCurrencyDirectory 0x9212Fb72...611BF: the adapter below
+      // is listed, and its adaptedToken() -> this token (symbol USDC, 6 dec).
+      token: '0x01C5C0122039549AD1493B8220cABEdD739BC44E',
+      adapter: '0xbf1441Ea57f43f35f713431001f35742c88071c7',
       decimals: 6,
     },
     mentoBroker: '0xB9Ae2065142EB79b6c5EB1E8778F883fad6B07Ba',
@@ -84,6 +95,10 @@ export const NETWORKS: Record<NetworkName, NetworkProfile> = {
       BRLm: '0x2294298942fdc79417DE9E0D740A4957E0e7783a',
     },
     x402: { facilitatorUrl: X402_FACILITATOR_URL, network: 'eip155:11142220' },
+    erc8004: {
+      identityRegistry: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
+      reputationRegistry: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
+    },
   },
   celo: {
     name: 'celo',
@@ -106,6 +121,10 @@ export const NETWORKS: Record<NetworkName, NetworkProfile> = {
       BRLm: '0xe8537a3d056da446677b9e9d6c5db704eaab4787',
     },
     x402: { facilitatorUrl: X402_FACILITATOR_URL, network: 'eip155:42220' },
+    erc8004: {
+      identityRegistry: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+      reputationRegistry: '0x8004BAa17C55a88189AE136b182e5fdA19dE9b63',
+    },
   },
 };
 
@@ -129,6 +148,14 @@ export interface AppConfig {
   /** QUOTE_ENGINE env: mock | mento | auto (default auto). */
   quoteEngine: QuoteEngineChoice;
   corsOrigin: string;
+  /** Public backend URL (API_BASE_URL env), no trailing slash. */
+  apiBaseUrl: string;
+  /**
+   * Public URL of the ERC-8004 registration file. Defaults to
+   * `<apiBaseUrl>/agent-registration.json` (served by this backend); override
+   * with AGENT_REGISTRATION_URL (e.g. an ipfs:// URI).
+   */
+  agentRegistrationUrl: string;
 }
 
 export class ConfigError extends Error {
@@ -185,6 +212,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   // Optional RPC override (Forno is rate-limited; see ARQUITECTURA §0 / R10).
   const network: NetworkProfile = env.RPC_URL ? { ...profile, rpcUrl: env.RPC_URL } : profile;
 
+  const apiBaseUrl = (env.API_BASE_URL || `http://localhost:${port}`).replace(/\/+$/, '');
+  const agentRegistrationUrl =
+    env.AGENT_REGISTRATION_URL || `${apiBaseUrl}/agent-registration.json`;
+
   return {
     network,
     port,
@@ -196,5 +227,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     demoPrivateKey: env.DEMO_PRIVATE_KEY || undefined,
     quoteEngine: quoteEngineRaw,
     corsOrigin: env.CORS_ORIGIN || '*',
+    apiBaseUrl,
+    agentRegistrationUrl,
   };
 }

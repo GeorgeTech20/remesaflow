@@ -119,7 +119,7 @@ app.use(paymentMiddleware(
 ### 1.5 Stablecoin del pago x402 (DECISIÓN)
 
 **USDC** — `0xcebA9300f2b948710d2653dD7B07f33A8B32118C` (mainnet, 6 decimales). Razones: listado por el skill como token de pago x402, soporta EIP-3009 (requisito del scheme `exact`), y además tiene adapter de gas (sección 3).
-- Testnet (Celo Sepolia) USDC: `0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B` (ojo: coincide con la dirección del *adapter* de USDC en mainnet; es así en la fuente, no es typo nuestro).
+- Testnet (Celo Sepolia) USDC: `0x01C5C0122039549AD1493B8220cABEdD739BC44E` (6 dec). **CORREGIDO 2026-07-14 (F11):** la dirección que daban los skills (`0x2F25deB3...`) NO tiene código en Sepolia (`symbol()` devuelve `0x`). La real se obtuvo del FeeCurrencyDirectory: `adaptedToken()` del adapter listado → symbol `USDC`, 6 decimales. R7 resuelto.
 - Alternativas listadas por el skill: USDT `0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e` (6 dec), USDm `0x765DE816845861e75A25fCA122bb6898B8B1282a` (18 dec). No las usamos en v1.
 
 ---
@@ -204,7 +204,7 @@ Solo **viem** soporta `feeCurrency` (ethers.js y web3.js NO). Tx tipo CIP-64 (`0
 
 | feeCurrency | Mainnet (42220) | Celo Sepolia (11142220) |
 |-------------|-----------------|--------------------------|
-| USDC (adapter) | `0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B` | `0x4822e58de6f5e485eF90df51C41CE01721331dC0` |
+| USDC (adapter) | `0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B` | `0xbf1441Ea57f43f35f713431001f35742c88071c7` **(CORREGIDO 2026-07-14: el `0x4822e58d...` de los skills revierte "Currency not in the directory"; este sí está en el FeeCurrencyDirectory y `eth_gasPrice(adapter)` responde — R8 resuelto)** |
 | USDT (adapter) | `0x0e2a3e05bc9a16f5292a6170456a710cb89c6f72` | — (no listado) |
 | cUSD/USDm (token directo) | `0x765DE816845861e75A25fCA122bb6898B8B1282a` | PENDIENTE VERIFICAR si es fee currency en Sepolia (comando abajo) |
 | CELO | omitir el campo | omitir el campo |
@@ -226,7 +226,7 @@ const hash = await walletClient.writeContract({
   abi: ERC20_ABI,
   functionName: "transfer",
   args: [to, amount],
-  feeCurrency: "0x4822e58de6f5e485eF90df51C41CE01721331dC0", // USDC adapter Sepolia
+  feeCurrency: "0xbf1441Ea57f43f35f713431001f35742c88071c7", // USDC adapter Sepolia (verificado on-chain 2026-07-14)
 });
 ```
 
@@ -347,8 +347,8 @@ Una sola fuente de verdad `config/networks.ts` con este shape (valores de las se
 | R4 | No sabemos qué assets acepta el facilitador (USDC seguro es el candidato; ¿USDT? ¿USDm?) | Probar `POST /verify` con PaymentRequirements de cada asset y ver si devuelve `isValid` vs `invalidReason` |
 | R5 | Ruta Mento `USDC → KESm` no garantizada | `mento.routes.findRoute(USDC, KESm)` en ambas redes ANTES de codear F3 (ver 2.4, con fallback definido) |
 | R6 | ¿USDm/cUSD soporta EIP-3009 (`transferWithAuthorization`) para scheme `exact`? | Irrelevante si nos quedamos en USDC (sí lo soporta). Verificar solo si R4 nos empuja a USDm |
-| R7 | USDC en Sepolia (`0x2F25de...`) coincide con el adapter de mainnet — raro pero es lo que dicen dos skills | Confirmar: `cast call 0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B "symbol()(string)" --rpc-url https://forno.celo-sepolia.celo-testnet.org` |
-| R8 | Fee currencies reales habilitadas en Sepolia (skill solo lista USDC) | `cast call 0x9212Fb72ae65367A7c887eC4Ad9bE310BAC611BF "getCurrencies()(address[])" --rpc-url https://forno.celo-sepolia.celo-testnet.org` |
+| R7 | ~~USDC en Sepolia (`0x2F25de...`) coincide con el adapter de mainnet~~ **RESUELTO 2026-07-14 (F11): era FALSO — `0x2F25deB3...` no tiene código en Sepolia. USDC real: token `0x01C5C0122039549AD1493B8220cABEdD739BC44E`, adapter `0xbf1441Ea57f43f35f713431001f35742c88071c7` (vía `adaptedToken()` del directory). `backend/src/config.ts` ya corregido; el bot (`bot/src/payment.test.ts`, `bot/README.md`) sigue con la vieja — corregir.** | — |
+| R8 | ~~Fee currencies reales habilitadas en Sepolia~~ **RESUELTO 2026-07-14 (F11): directory devuelve 21 monedas — cUSD, cEUR, cREAL, WETH, USD₮, adapter USDC (`0xbf1441Ea...`) y los tokens Mento 18-dec (USDm, KESm, PHPm, COPm, NGNm, BRLm, EURm, GBPm, JPYm, XOFm, AUDm, CADm, CHFm, GHSm, ZARm). El adapter `0x4822e58d...` de los skills NO está.** | `cast call 0x9212Fb72ae65367A7c887eC4Ad9bE310BAC611BF "getCurrencies()(address[])" --rpc-url https://forno.celo-sepolia.celo-testnet.org` |
 | R9 | Liquidez/slippage de pools regionales en testnet puede ser nula | Si `getAmountOut` revierte en Sepolia, cotizar contra mainnet (solo lectura, gratis) y ejecutar swap demo en Sepolia con par que sí tenga pool |
 | R10 | Forno rate-limited | Retry + fallback Ankr/dRPC en el transport de viem (`fallback([http(a), http(b)])`) |
 
@@ -359,6 +359,6 @@ Una sola fuente de verdad `config/networks.ts` con este shape (valores de las se
 - Testnet = **Celo Sepolia (11142220)**, no Alfajores.
 - x402: **@x402/hono v2** + facilitador `https://api.x402.celo.org` (mainnet), pago en **USDC**; settle necesita API key (acción humana); testnet vía thirdweb/mock.
 - Mento: **@mento-protocol/mento-sdk@3.2.8**; corredor demo **USDC/USDm → KESm** (verificar ruta primero). Broker mainnet `0x777A8255cA72412f0d706dc03C9D1987306B4CaD`, Sepolia `0xB9Ae2065142EB79b6c5EB1E8778F883fad6B07Ba`.
-- Gas: viem `feeCurrency` = USDC adapter (`0x2F25deB3...` mainnet / `0x4822e58d...` Sepolia).
+- Gas: viem `feeCurrency` = USDC adapter (`0x2F25deB3...` mainnet / `0xbf1441Ea...` Sepolia — corregido 2026-07-14, ver R7/R8).
 - Identidad: ERC-8004 Identity Registry `0x8004A169...` (main) / `0x8004A818...` (Sepolia).
 - Attribution: **@celo/attribution-tags@0.3.0**, `dataSuffix: toDataSuffix(CODE)` en toda tx.

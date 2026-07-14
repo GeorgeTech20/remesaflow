@@ -2,7 +2,7 @@
  * Hono app factory. Kept separate from index.ts so tests can build an app
  * (with injected config/engine/logger/wallet) without opening a socket.
  */
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { type AppConfig, loadConfig } from './config.js';
 import type { EngineMode } from './engine.js';
@@ -16,6 +16,7 @@ import {
 } from './quote.js';
 import { registerDemoRoutes } from './demo.js';
 import { clientIp, rateLimit } from './ratelimit.js';
+import { buildAgentRegistration } from './registration.js';
 import type { AgentWallet } from './wallet.js';
 import { x402 } from './x402.js';
 
@@ -153,6 +154,13 @@ export function createApp(options: AppOptions = {}): Hono {
       since: stats.since,
     }),
   );
+
+  // F11 — ERC-8004 registration file (free; the Identity Registry tokenURI
+  // points here). Also exposed at the A2A well-known path for discovery.
+  const agentRegistration = (c: Context) =>
+    c.json(buildAgentRegistration(config, wallet?.getAgentAddress() ?? null, supported));
+  app.get('/agent-registration.json', agentRegistration);
+  app.get('/.well-known/agent.json', agentRegistration);
 
   return app;
 }

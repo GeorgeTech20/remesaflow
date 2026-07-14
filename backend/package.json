@@ -11,7 +11,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "register:8004": "tsx scripts/register-8004.ts"
   },
   "dependencies": {
     "@celo/attribution-tags": "^0.3.0",

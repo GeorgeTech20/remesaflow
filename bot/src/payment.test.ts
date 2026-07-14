@@ -11,8 +11,9 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { createPayAndFetch, PaymentRequiredError } from "./payment";
 
 const QUOTE_URL = "http://localhost:3000/api/quote?amount=50&to=KES";
-// Celo Sepolia USDC (ARQUITECTURA.md 1.5), 6 decimals.
-const USDC_SEPOLIA = "0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B";
+// Celo Sepolia USDC (verified on-chain vs FeeCurrencyDirectory — the address
+// the official skills list is wrong; see ARQUITECTURA.md 1.5), 6 decimals.
+const USDC_SEPOLIA = "0x01C5C0122039549AD1493B8220cABEdD739BC44E";
 const PAY_TO = "0x1111111111111111111111111111111111111111";
 
 function paymentRequiredBody(amount = "10000") {

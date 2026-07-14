@@ -40,7 +40,7 @@ Cómo fondearla (Celo Sepolia, testnet):
 1. Generar una wallet nueva (ej. `cast wallet new`) y poner la key en `BOT_PRIVATE_KEY` del `.env` raíz.
 2. Pedir CELO de testnet en https://faucet.celo.org (sirve para swaps).
 3. Conseguir USDC de testnet: swap en https://app.mento.org o faucet de Circle (https://faucet.circle.com, seleccionar Celo Sepolia si está disponible).
-4. Verificar saldo: USDC Sepolia es `0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B`.
+4. Verificar saldo: USDC Sepolia es `0x01C5C0122039549AD1493B8220cABEdD739BC44E` (verificado on-chain; la dirección que listan los skills oficiales está mal).
 
 En mainnet (`NETWORK=celo`): transferir USDC real (`0xcebA9300f2b948710d2653dD7B07f33A8B32118C`) a la dirección del bot. Con $1 alcanzan 100 cotizaciones.
 

@@ -75,6 +75,28 @@ with a warning; **mainnet refuses to send**.
 | `GET /api/quote?amount=50&to=KES` | x402 | Quote with WU/Wise comparison |
 | `GET /api/health` | no | Status + network + engine mode + block number |
 | `GET /api/stats` | no | In-memory quote counter |
+| `GET /agent-registration.json` | no | ERC-8004 registration file (also at `/.well-known/agent.json`) |
+
+## ERC-8004 (agent identity)
+
+The agent registers itself in the on-chain **Identity Registry** (an ERC-721
+mint; addresses per network in `src/config.ts`, minimal ABI in
+`src/abis/identity-registry.ts`). The token URI points at the registration
+file this backend serves for free at `GET /agent-registration.json`
+(name, description, x402 capability + corridors, agent wallet address —
+placeholder zero-address until `AGENT_PRIVATE_KEY` is set). Override the URI
+with `AGENT_REGISTRATION_URL`; it defaults to
+`<API_BASE_URL>/agent-registration.json`.
+
+```bash
+npm run register:8004                # dry-run: checks registration, prints the tx plan. Signs NOTHING.
+npm run register:8004 -- --execute   # sends the real register() tx (funded AGENT_PRIVATE_KEY required)
+```
+
+The dry-run works without a key (read-only, placeholder sender). The real tx
+goes through `sendWithTag()` (ERC-8021 attribution + gas in USDC) and prints
+the explorer link + `agentId` (from the mint's Transfer log) — that link goes
+in the hackathon tweet.
 
 ## Build / test / Docker
 
