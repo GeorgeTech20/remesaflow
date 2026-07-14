@@ -15,7 +15,9 @@ Las variables viven en el `.env` de la **raíz del monorepo** (ver `.env.example
 | `TELEGRAM_BOT_TOKEN` | Sí | Token de @BotFather. Sin él, el bot sale con error claro. |
 | `API_BASE_URL` | No | Backend RemesaFlow. Default `http://localhost:3000`. |
 | `LANDING_URL` | No | Link en las cotizaciones. Default `https://remesaflow.example`. |
-| `BOT_PRIVATE_KEY` | No (TODO) | Firmará pagos x402 cuando el backend devuelva 402 en prod. |
+| `BOT_PRIVATE_KEY` | No* | Key (0x…) de la wallet que firma pagos x402. Sin ella el bot degrada a fetch directo (solo sirve contra backend con `X402_ENABLED=false`). **Nunca commitear.** |
+| `NETWORK` | No | `celo-sepolia` (default) o `celo`. Define en qué red firma pagos el bot. |
+| `BOT_MAX_PAYMENT_BASE_UNITS` | No | Tope de seguridad por pago, en unidades base del asset (USDC = 6 decimales). Default `100000` = $0.10; una cotización cuesta `10000` = $0.01. |
 
 ```bash
 cd bot
@@ -23,7 +25,26 @@ npm install
 npm run dev    # tsx watch
 npm run build  # tsc -> dist/
 npm start      # node dist/bot.js
+npm test       # tests unitarios de payment.ts (sin red, key efímera)
 ```
+
+## Wallet del bot (x402)
+
+El bot paga cada cotización firmando una autorización **EIP-3009** de USDC
+(`transferWithAuthorization`, x402 v2 scheme `exact`). La firma es local (viem);
+quien mueve los fondos on-chain es el facilitador vía el backend, así que la
+wallet del bot **no necesita CELO para gas** — solo saldo USDC.
+
+Cómo fondearla (Celo Sepolia, testnet):
+
+1. Generar una wallet nueva (ej. `cast wallet new`) y poner la key en `BOT_PRIVATE_KEY` del `.env` raíz.
+2. Pedir CELO de testnet en https://faucet.celo.org (sirve para swaps).
+3. Conseguir USDC de testnet: swap en https://app.mento.org o faucet de Circle (https://faucet.circle.com, seleccionar Celo Sepolia si está disponible).
+4. Verificar saldo: USDC Sepolia es `0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B`.
+
+En mainnet (`NETWORK=celo`): transferir USDC real (`0xcebA9300f2b948710d2653dD7B07f33A8B32118C`) a la dirección del bot. Con $1 alcanzan 100 cotizaciones.
+
+Al arrancar, el bot loguea la dirección de la wallet y la red, o un warning claro si corre en modo degradado.
 
 ## Comandos del bot
 
@@ -34,7 +55,8 @@ npm start      # node dist/bot.js
 ## Estructura
 
 - `src/config.ts` — env (lee `../.env` de la raíz), fail-fast sin token
-- `src/payment.ts` — `payAndFetch(url)`: hoy fetch directo; TODO(ARQUI) firmar x402 con `BOT_PRIVATE_KEY` al recibir 402
+- `src/payment.ts` — `payAndFetch(url)`: cliente x402 v2 real (`@x402/fetch` + `@x402/evm` + viem). 402 → firma EIP-3009 → retry con `PAYMENT-SIGNATURE`. Sin `BOT_PRIVATE_KEY` degrada a fetch directo.
+- `src/payment.test.ts` — tests unitarios (fetch mockeado, key efímera, sin red)
 - `src/bot.ts` — comandos, callbacks, formato de cotización
 
 Textos del bot en español. TODO(i18n): versión EN.

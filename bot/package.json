@@ -10,11 +10,16 @@
   "scripts": {
     "dev": "tsx watch src/bot.ts",
     "build": "tsc",
-    "start": "node dist/bot.js"
+    "start": "node dist/bot.js",
+    "test": "tsx --test src/payment.test.ts"
   },
   "dependencies": {
+    "@x402/core": "^2.18.0",
+    "@x402/evm": "^2.18.0",
+    "@x402/fetch": "^2.18.0",
     "dotenv": "^16.4.5",
-    "grammy": "^1.30.0"
+    "grammy": "^1.30.0",
+    "viem": "^2.55.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

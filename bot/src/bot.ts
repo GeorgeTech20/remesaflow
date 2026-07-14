@@ -309,10 +309,7 @@ async function sendQuote(ctx: Context, amount: number, code: string): Promise<vo
   } catch (err) {
     if (err instanceof PaymentRequiredError) {
       console.error(err.message);
-      await ctx.reply(
-        "🔒 El servicio ahora requiere pago x402 y esta versión del bot " +
-          "todavía no firma pagos. Estamos en eso — probá más tarde.",
-      );
+      await ctx.reply(err.userMessage);
       return;
     }
     console.error("sendQuote failed:", err);
