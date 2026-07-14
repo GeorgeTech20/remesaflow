@@ -1,0 +1,29 @@
+# Render blueprint — backend API (alternative: Railway, see DEPLOY.md)
+services:
+  - type: web
+    name: remesaflow-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /api/health
+    envVars:
+      - key: NETWORK
+        value: celo-sepolia
+      - key: QUOTE_ENGINE
+        value: auto
+      - key: X402_ENABLED
+        value: "false"
+      - key: DEMO_MODE
+        value: "true"
+      - key: CORS_ORIGIN
+        value: "*"
+      # Secrets — set in the Render dashboard, never here:
+      - key: AGENT_PRIVATE_KEY
+        sync: false
+      - key: DEMO_PRIVATE_KEY
+        sync: false
+      - key: ATTRIBUTION_TAG
+        sync: false
+      - key: X402_FACILITATOR_API_KEY
+        sync: false
