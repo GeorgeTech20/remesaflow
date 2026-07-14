@@ -54,6 +54,8 @@ export interface SettledPayment {
   /** On-chain tx hash from the facilitator, or null in degraded mode. */
   txHash: string | null;
   payer: string | null;
+  /** Request path that was paid for, e.g. "/api/quote" or "/api/remit". */
+  path: string;
   /** Query params of the paid request (amount, to, ...). */
   query: Record<string, string | string[]>;
   /** Best-effort client ip (x-forwarded-for). */
@@ -81,15 +83,16 @@ interface AdapterLike {
 }
 
 /** Pulls request info back out of the x402 transport context (Hono adapter). */
-function requestInfo(transportContext: unknown): Pick<SettledPayment, 'query' | 'ip'> {
+function requestInfo(transportContext: unknown): Pick<SettledPayment, 'query' | 'ip' | 'path'> {
   const request = (transportContext as { request?: { adapter?: AdapterLike } } | undefined)
     ?.request;
   const adapter = request?.adapter;
   if (!adapter) {
-    return { query: {}, ip: null };
+    return { query: {}, ip: null, path: '' };
   }
   const forwarded = adapter.getHeader('x-forwarded-for');
   return {
+    path: adapter.getPath(),
     query: adapter.getQueryParams(),
     ip: forwarded ? (forwarded.split(',')[0]?.trim() ?? null) : null,
   };
@@ -168,22 +171,33 @@ export function x402(options: X402Options): MiddlewareHandler {
     });
   }
 
+  // Explicit AssetAmount: Celo is not in @x402/evm's default-stablecoin
+  // registry, so a "$0.01" Money price would not parse. USDC, 6 decimals.
+  const price = {
+    asset: options.usdc.token,
+    amount: PRICE_USDC_BASE_UNITS,
+    extra: { name: 'USDC', version: '2' },
+  };
+  const accepts = {
+    scheme: 'exact' as const,
+    network: options.network,
+    payTo,
+    price,
+    maxTimeoutSeconds: 60,
+  };
+
   const routes: RoutesConfig = {
     'GET /api/quote': {
-      accepts: {
-        scheme: 'exact',
-        network: options.network,
-        payTo,
-        // Explicit AssetAmount: Celo is not in @x402/evm's default-stablecoin
-        // registry, so a "$0.01" Money price would not parse. USDC, 6 decimals.
-        price: {
-          asset: options.usdc.token,
-          amount: PRICE_USDC_BASE_UNITS,
-          extra: { name: 'USDC', version: '2' },
-        },
-        maxTimeoutSeconds: 60,
-      },
+      accepts,
       description: 'Remittance quote USD -> local currency',
+      mimeType: 'application/json',
+    },
+    // F-EXEC. Same $0.01 fee as a quote: the agent's revenue is the x402 fee,
+    // NOT a spread on the remittance. The remitted value itself goes to the
+    // recipient in full. GET /api/remit/:txHash (status) stays free.
+    'POST /api/remit': {
+      accepts,
+      description: 'Execute a remittance: swap USD -> local stablecoin and deliver to recipient',
       mimeType: 'application/json',
     },
   };

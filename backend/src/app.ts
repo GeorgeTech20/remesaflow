@@ -2,6 +2,7 @@
  * Hono app factory. Kept separate from index.ts so tests can build an app
  * (with injected config/engine/logger/wallet) without opening a socket.
  */
+import { randomUUID } from 'node:crypto';
 import { type Context, Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { type AppConfig, loadConfig } from './config.js';
@@ -17,6 +18,7 @@ import {
 import { registerDemoRoutes } from './demo.js';
 import { clientIp, rateLimit } from './ratelimit.js';
 import { buildAgentRegistration } from './registration.js';
+import { RemitError, type RemitService } from './remit.js';
 import type { AgentWallet } from './wallet.js';
 import { x402 } from './x402.js';
 
@@ -28,6 +30,11 @@ export interface AppOptions {
   queryLog?: QueryLog;
   /** Needed for x402 payTo and /api/health blockNumber. */
   agentWallet?: AgentWallet;
+  /**
+   * F-EXEC. Absent (no Mento engine / no wallet) => POST /api/remit answers 503
+   * instead of 404, so the failure is explained rather than mysterious.
+   */
+  remitService?: RemitService;
 }
 
 export function createApp(options: AppOptions = {}): Hono {
@@ -36,7 +43,8 @@ export function createApp(options: AppOptions = {}): Hono {
   const engineMode = options.engineMode ?? 'mock';
   const queryLog = options.queryLog ?? new JsonlQueryLogger();
   const wallet = options.agentWallet;
-  const stats = { quotesServed: 0, since: new Date().toISOString() };
+  const remitService = options.remitService;
+  const stats = { quotesServed: 0, remitsExecuted: 0, since: new Date().toISOString() };
 
   const supported = engine.supportedCurrencies?.() ?? SUPPORTED_CURRENCIES;
 
@@ -44,31 +52,38 @@ export function createApp(options: AppOptions = {}): Hono {
 
   app.use('*', cors({ origin: config.corsOrigin }));
   app.use('/api/*', rateLimit());
-  // Only the quote endpoint is paid; everything else stays free.
-  app.use(
-    '/api/quote',
-    x402({
-      enabled: config.x402Enabled,
-      payTo: wallet?.getAgentAddress() ?? null,
-      network: config.network.x402.network,
-      facilitatorUrl: config.network.x402.facilitatorUrl,
-      apiKey: config.x402FacilitatorApiKey,
-      usdc: config.network.usdc,
-      onSettled: (payment) => {
-        // Settle happens AFTER the route handler; this is where the real
-        // txHash lands in the query log (replaces the mock's null).
-        const to = String(payment.query.to ?? '').toUpperCase();
-        const amount = Number(payment.query.amount ?? 0);
-        queryLog.log({
-          timestamp: new Date().toISOString(),
-          pair: `USD-${to}`,
-          amount,
-          txHash: payment.txHash,
-          ipHash: hashIp(payment.ip ?? 'unknown'),
-        });
-      },
-    }),
-  );
+
+  // Paid endpoints: GET /api/quote and POST /api/remit (both $0.01 in USDC).
+  // Everything else — including GET /api/remit/:txHash — stays free.
+  const paymentGate = x402({
+    enabled: config.x402Enabled,
+    payTo: wallet?.getAgentAddress() ?? null,
+    network: config.network.x402.network,
+    facilitatorUrl: config.network.x402.facilitatorUrl,
+    apiKey: config.x402FacilitatorApiKey,
+    usdc: config.network.usdc,
+    onSettled: (payment) => {
+      // Settle happens AFTER the route handler; this is where the real
+      // txHash lands in the query log (replaces the mock's null).
+      if (payment.path !== '/api/quote') {
+        // A paid remittance is audited in logs/remits.jsonl, not in the quote
+        // log — recording it as a quote would corrupt the query stats.
+        console.log(`[x402] settled ${payment.path}: tx=${payment.txHash ?? 'degraded'}`);
+        return;
+      }
+      const to = String(payment.query.to ?? '').toUpperCase();
+      const amount = Number(payment.query.amount ?? 0);
+      queryLog.log({
+        timestamp: new Date().toISOString(),
+        pair: `USD-${to}`,
+        amount,
+        txHash: payment.txHash,
+        ipHash: hashIp(payment.ip ?? 'unknown'),
+      });
+    },
+  });
+  app.use('/api/quote', paymentGate);
+  app.use('/api/remit', paymentGate);
 
   app.get('/api/currencies', (c) =>
     c.json({
@@ -108,6 +123,15 @@ export function createApp(options: AppOptions = {}): Hono {
           ipHash: hashIp(clientIp(c)),
         });
       }
+
+      // F-EXEC: hand out a quoteId so POST /api/remit can hold the execution to
+      // the rate the user actually saw (slippage guard). Only meaningful when
+      // execution is wired up; a plain quote client can ignore it.
+      if (remitService) {
+        const quoteId = randomUUID();
+        remitService.quotes.register(quoteId, { fiat: to, rate: quote.rate, amount });
+        return c.json({ ...quote, quoteId });
+      }
       return c.json(quote);
     } catch (err) {
       if (err instanceof UnsupportedPairError) {
@@ -115,6 +139,81 @@ export function createApp(options: AppOptions = {}): Hono {
           { error: 'unsupported_currency', requested: err.requested, available: err.available },
           400,
         );
+      }
+      throw err;
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // F-EXEC — execution. POST /api/remit moves REAL funds, so it is paid ($0.01
+  // x402, same as a quote) and gated by every guardrail in remit.ts. One
+  // request = one remittance = one value-carrying tx. No loops, no batching.
+  // -------------------------------------------------------------------------
+
+  /** Remittance execution is unavailable unless BOTH the Mento engine and a
+   * signing wallet are wired. Says why, instead of 404ing. */
+  const remitUnavailable = (c: Context) =>
+    c.json(
+      {
+        error: 'remit_unavailable',
+        message:
+          'Remittance execution is not available on this deployment: it needs the Mento quote ' +
+          'engine (a reachable Celo RPC with tradable routes) and an agent wallet ' +
+          '(AGENT_PRIVATE_KEY). This agent is quote-only right now.',
+      },
+      503,
+    );
+
+  app.post('/api/remit', async (c) => {
+    if (!remitService) return remitUnavailable(c);
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json(
+        { error: 'invalid_body', message: 'Expected a JSON body: { amount, to, recipient }.' },
+        400,
+      );
+    }
+    const { amount, to, recipient, quoteId } = (body ?? {}) as Record<string, unknown>;
+
+    try {
+      const result = await remitService.execute({
+        amount: amount as number,
+        to: String(to ?? ''),
+        recipient: String(recipient ?? ''),
+        quoteId: typeof quoteId === 'string' ? quoteId : undefined,
+      });
+      stats.remitsExecuted += 1;
+      return c.json(result);
+    } catch (err) {
+      if (err instanceof RemitError) {
+        // 4xx/5xx with a machine-readable code; nothing was executed unless the
+        // code says otherwise (swap_failed carries the reverted txHash).
+        return c.json(err.toJSON(), err.status as 400);
+      }
+      console.error('[remit] unexpected failure:', err);
+      return c.json(
+        {
+          error: 'remit_failed',
+          message:
+            'The remittance could not be completed. If no txHash was returned, no funds left ' +
+            'the agent wallet.',
+        },
+        500,
+      );
+    }
+  });
+
+  // Free: on-chain status of a remittance (also decodes its ERC-8021 tag).
+  app.get('/api/remit/:txHash', async (c) => {
+    if (!remitService) return remitUnavailable(c);
+    try {
+      return c.json(await remitService.getStatus(c.req.param('txHash')));
+    } catch (err) {
+      if (err instanceof RemitError) {
+        return c.json(err.toJSON(), err.status as 400);
       }
       throw err;
     }
@@ -151,7 +250,16 @@ export function createApp(options: AppOptions = {}): Hono {
   app.get('/api/stats', (c) =>
     c.json({
       quotesServed: stats.quotesServed,
+      remitsExecuted: stats.remitsExecuted,
       since: stats.since,
+      // Public, on purpose: the guardrails are a feature, and judges can see
+      // the caps without reading our env.
+      remit: {
+        enabled: config.remit.enabled && remitService !== undefined,
+        maxUsd: config.remit.maxUsd,
+        dailyCapUsd: config.remit.dailyCapUsd,
+        maxSlippagePct: config.remit.maxSlippagePct,
+      },
     }),
   );
 

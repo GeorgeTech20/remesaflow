@@ -34,6 +34,32 @@ interface Quote {
   wiseWouldCharge: number;
   savings: number;
   timestamp: string;
+  /** F-EXEC: binds /enviar to the rate the user actually saw. */
+  quoteId?: string;
+}
+
+/** Successful POST /api/remit response. */
+interface RemitResult {
+  txHash: string;
+  explorerUrl: string;
+  sent: number;
+  received: number;
+  rate: number;
+  recipient: string;
+  currency: string;
+  status: "success" | "pending" | "failed";
+  minReceived: number;
+}
+
+/** Error body from POST /api/remit (guardrail rejections). */
+interface RemitErrorBody {
+  error: string;
+  message: string;
+  newRate?: number;
+  quotedRate?: number;
+  max?: number;
+  dailyCapUsd?: number;
+  remainingTodayUsd?: number;
 }
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -61,6 +87,40 @@ async function getQuote(amount: number, to: string): Promise<Quote> {
     throw new Error(`GET /api/quote -> HTTP ${res.status}`);
   }
   return (await res.json()) as Quote;
+}
+
+/** Thrown when the backend refused the remittance (a guardrail, not a crash). */
+class RemitRejected extends Error {
+  constructor(readonly body: RemitErrorBody, readonly status: number) {
+    super(`POST /api/remit -> ${status} ${body.error}`);
+    this.name = "RemitRejected";
+  }
+}
+
+/**
+ * Executes a remittance. Pays $0.01 via x402 (same as a quote) and moves REAL
+ * funds — only ever called from the explicit confirmation handler.
+ */
+async function postRemit(pending: Pending): Promise<RemitResult> {
+  const res = await payAndFetch(`${config.apiBaseUrl}/api/remit`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      amount: pending.amount,
+      to: pending.code,
+      recipient: pending.recipient,
+      ...(pending.quoteId ? { quoteId: pending.quoteId } : {}),
+    }),
+  });
+
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({
+      error: "unknown",
+      message: `HTTP ${res.status}`,
+    }))) as RemitErrorBody;
+    throw new RemitRejected(body, res.status);
+  }
+  return (await res.json()) as RemitResult;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +163,66 @@ function formatQuote(q: Quote, cur: Currency | undefined): string {
   ].join("\n");
 }
 
+function formatRemit(r: RemitResult): string {
+  const pendingNote =
+    r.status === "pending"
+      ? "\n\n⏳ La tx ya está en la red pero todavía no confirmó. Seguila en el explorer."
+      : "";
+  return [
+    `✅ *Remesa enviada*`,
+    ``,
+    `Enviaste: *${usd(r.sent)} USD*`,
+    `Recibió: *${local(r.received)} ${r.currency}*`,
+    `Tasa: 1 USD = ${r.rate.toLocaleString("en-US", { maximumFractionDigits: 4 })} ${r.currency}`,
+    ``,
+    `Destinatario:`,
+    `\`${r.recipient}\``,
+    ``,
+    `🔗 [Ver la transacción](${r.explorerUrl})`,
+    `\`${r.txHash}\``,
+  ].join("\n") + pendingNote;
+}
+
+/** Turns a backend guardrail rejection into copy a human can act on. */
+function remitErrorMessage(err: RemitRejected): string {
+  const { body } = err;
+  switch (body.error) {
+    case "remit_disabled":
+    case "remit_unavailable":
+      return (
+        "🔒 Los envíos reales están *deshabilitados* en este servidor. " +
+        "Por ahora solo cotizo (/cotizar)."
+      );
+    case "amount_over_limit":
+      return `🚫 El monto supera el límite por remesa${body.max ? ` (*${usd(body.max)}*)` : ""}.`;
+    case "daily_cap_exceeded":
+      return (
+        `🚫 El agente llegó a su *tope diario*` +
+        (body.dailyCapUsd ? ` de ${usd(body.dailyCapUsd)}` : "") +
+        `. Probá mañana.`
+      );
+    case "rate_moved":
+      return (
+        `⚠️ *La tasa se movió* mientras confirmabas — no ejecuté nada.\n\n` +
+        (body.newRate ? `Nueva tasa: 1 USD = ${body.newRate.toFixed(4)}\n\n` : "") +
+        `Pedí una cotización nueva con /enviar si te sirve.`
+      );
+    case "quote_expired":
+      return "⌛ La cotización venció. Pedí una nueva con /enviar.";
+    case "insufficient_funds":
+      return (
+        "😬 El agente no tiene fondos suficientes para esta remesa. " +
+        "Avisale al admin que recargue la wallet."
+      );
+    case "self_dealing":
+      return "🚫 No puedo enviar a la wallet del propio agente.";
+    case "invalid_recipient":
+      return "⚠️ La dirección del destinatario no es válida.";
+    default:
+      return `😕 No pude completar la remesa: ${body.message}`;
+  }
+}
+
 function pairsList(data: CurrenciesResponse): string {
   const lines = data.currencies.map(
     (c) => `• ${c.flag} *USD → ${c.code}* — ${c.country} (vía ${c.stablecoin})`,
@@ -115,6 +235,56 @@ function pairsList(data: CurrenciesResponse): string {
     `Cotizá con /cotizar — ej: \`/cotizar 50 KES\``,
   ].join("\n");
 }
+
+// ---------------------------------------------------------------------------
+// F-EXEC — pending confirmations
+//
+// A remittance moves real money, so it ALWAYS takes two steps: /enviar shows a
+// quote, and only an explicit button press executes it. The pending intent
+// lives here (Telegram callback_data caps at 64 bytes — an address alone eats
+// 42 — so the button carries a short id, not the payload).
+// ---------------------------------------------------------------------------
+
+interface Pending {
+  amount: number;
+  code: string;
+  recipient: string;
+  quoteId?: string;
+  /** Only the user who asked may confirm (matters in group chats). */
+  userId: number;
+  expiresAt: number;
+}
+
+/** Matches the backend's 120s quote TTL. */
+const CONFIRM_TTL_MS = 120_000;
+
+const pending = new Map<string, Pending>();
+
+function putPending(intent: Omit<Pending, "expiresAt">): string {
+  // Opportunistic sweep: this map only ever holds a handful of live intents.
+  const now = Date.now();
+  for (const [key, value] of pending) {
+    if (value.expiresAt <= now) pending.delete(key);
+  }
+  const id = Math.random().toString(16).slice(2, 10);
+  pending.set(id, { ...intent, expiresAt: now + CONFIRM_TTL_MS });
+  return id;
+}
+
+/**
+ * Takes the intent and REMOVES it in one step. Single-use by construction: a
+ * double-tap on "Confirmar" finds nothing the second time, so it cannot
+ * double-send. Returns null when unknown/expired.
+ */
+function takePending(id: string): Pending | null {
+  const intent = pending.get(id);
+  if (!intent) return null;
+  pending.delete(id);
+  if (intent.expiresAt <= Date.now()) return null;
+  return intent;
+}
+
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
 // ---------------------------------------------------------------------------
 // Keyboards
@@ -154,6 +324,13 @@ function currencyKeyboard(currencies: Currency[], amount: number): InlineKeyboar
   return kb;
 }
 
+/** The only path to a real transfer: an explicit, human button press. */
+function confirmKeyboard(id: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("✅ Confirmar envío", `send:${id}`)
+    .text("❌ Cancelar", `cancel:${id}`);
+}
+
 // ---------------------------------------------------------------------------
 // Bot
 // ---------------------------------------------------------------------------
@@ -175,6 +352,7 @@ bot.command("start", async (ctx) => {
       ``,
       `Comandos:`,
       `• /cotizar \`<monto> <moneda>\` — ej: \`/cotizar 50 KES\``,
+      `• /enviar \`<monto> <moneda> <direccion>\` — enviar de verdad (te pido confirmación)`,
       `• /pares — corredores disponibles`,
       ``,
       `O tocá un corredor frecuente 👇`,
@@ -236,6 +414,142 @@ bot.callbackQuery(/^q:(\d+(?:\.\d+)?):([A-Za-z]{2,6})$/, async (ctx) => {
   const amount = Number(ctx.match[1]);
   const code = ctx.match[2].toUpperCase();
   await sendQuote(ctx, amount, code);
+});
+
+// ---------------------------------------------------------------------------
+// F-EXEC — /enviar <monto> <moneda> <direccion>
+//
+// Step 1 of 2. This command NEVER sends: it quotes, then asks. The transfer
+// only happens in the `send:` callback below, after a human presses the button.
+// ---------------------------------------------------------------------------
+
+bot.command("enviar", async (ctx) => {
+  const args = (ctx.match ?? "").trim().split(/\s+/).filter(Boolean);
+  const amount = parseAmount(args[0]);
+  const code = args[1]?.toUpperCase();
+  const recipient = args[2];
+
+  if (amount === null || !code || !recipient) {
+    await ctx.reply(
+      [
+        "📤 *Enviar una remesa real*",
+        "",
+        "Uso: `/enviar <monto> <moneda> <direccion>`",
+        "Ej: `/enviar 10 KES 0x1234...abcd`",
+        "",
+        "La dirección es la wallet del destinatario (recibe la stablecoin local).",
+        "Te muestro la cotización y *vos confirmás* antes de que se mueva un centavo.",
+      ].join("\n"),
+      { parse_mode: "Markdown" },
+    );
+    return;
+  }
+
+  if (!EVM_ADDRESS.test(recipient)) {
+    await ctx.reply(
+      "⚠️ Esa no es una dirección EVM válida (debe ser `0x` + 40 caracteres hex).",
+      { parse_mode: "Markdown" },
+    );
+    return;
+  }
+
+  // Quote first (costs $0.01 via x402) so the user sees the rate BEFORE deciding.
+  let quote: Quote;
+  try {
+    quote = await getQuote(amount, code);
+  } catch (err) {
+    if (err instanceof PaymentRequiredError) {
+      console.error(err.message);
+      await ctx.reply(err.userMessage);
+      return;
+    }
+    console.error("enviar/quote failed:", err);
+    await ctx.reply(ERR_API_DOWN);
+    return;
+  }
+
+  const id = putPending({
+    amount,
+    code,
+    recipient,
+    ...(quote.quoteId ? { quoteId: quote.quoteId } : {}),
+    userId: ctx.from?.id ?? 0,
+  });
+
+  await ctx.reply(
+    [
+      "📤 *Confirmá el envío*",
+      "",
+      `Enviás: *${usd(quote.send)} USD*`,
+      `Llega: *${local(quote.receives)} ${quote.currency}*`,
+      `Tasa: 1 USD = ${quote.rate.toLocaleString("en-US", { maximumFractionDigits: 4 })} ${quote.currency}`,
+      "",
+      `Destinatario:`,
+      `\`${recipient}\``,
+      "",
+      "⚠️ Esto mueve *fondos reales* on-chain. Revisá la dirección: " +
+        "una transferencia en blockchain *no se puede revertir*.",
+      "",
+      `_La cotización vence en 2 minutos._`,
+    ].join("\n"),
+    { parse_mode: "Markdown", reply_markup: confirmKeyboard(id) },
+  );
+});
+
+bot.callbackQuery(/^cancel:([0-9a-f]{1,16})$/, async (ctx) => {
+  takePending(ctx.match[1]);
+  await ctx.answerCallbackQuery({ text: "Cancelado" });
+  await ctx.editMessageText("❌ Envío cancelado. No se movió nada.");
+});
+
+// Step 2 of 2 — the ONLY place the bot triggers a real transfer.
+bot.callbackQuery(/^send:([0-9a-f]{1,16})$/, async (ctx) => {
+  // Consume the intent FIRST: single-use, so a double-tap cannot double-send.
+  const intent = takePending(ctx.match[1]);
+
+  if (!intent) {
+    await ctx.answerCallbackQuery({ text: "Cotización vencida" });
+    await ctx.editMessageText(
+      "⌛ Esa cotización venció o ya se usó. Pedí una nueva con /enviar.",
+    );
+    return;
+  }
+  // In a group, only the person who ran /enviar may confirm.
+  if (intent.userId && ctx.from?.id !== intent.userId) {
+    await ctx.answerCallbackQuery({
+      text: "Solo quien pidió el envío puede confirmarlo.",
+      show_alert: true,
+    });
+    pending.set(ctx.match[1], intent); // not ours to consume: put it back
+    return;
+  }
+
+  await ctx.answerCallbackQuery({ text: "Enviando… 🚀" });
+  await ctx.editMessageText("⏳ Ejecutando la remesa on-chain… (puede tardar unos segundos)");
+
+  try {
+    const result = await postRemit(intent);
+    await ctx.editMessageText(formatRemit(result), {
+      parse_mode: "Markdown",
+      link_preview_options: { is_disabled: true },
+    });
+  } catch (err) {
+    if (err instanceof RemitRejected) {
+      await ctx.editMessageText(remitErrorMessage(err), { parse_mode: "Markdown" });
+      return;
+    }
+    if (err instanceof PaymentRequiredError) {
+      console.error(err.message);
+      await ctx.editMessageText(err.userMessage);
+      return;
+    }
+    console.error("remit failed:", err);
+    await ctx.editMessageText(
+      "😕 No pude completar la remesa. Si no ves un txHash, *no se movió nada*. " +
+        "Probá de nuevo en unos minutos.",
+      { parse_mode: "Markdown" },
+    );
+  }
 });
 
 // Fallback for plain text: nudge towards /cotizar.
@@ -325,6 +639,7 @@ async function main(): Promise<void> {
   await bot.api.setMyCommands([
     { command: "start", description: "Qué hace RemesaFlow" },
     { command: "cotizar", description: "Cotizar una remesa: /cotizar 50 KES" },
+    { command: "enviar", description: "Enviar de verdad: /enviar 10 KES 0x..." },
     { command: "pares", description: "Corredores disponibles" },
   ]);
 

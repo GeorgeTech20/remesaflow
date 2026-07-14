@@ -175,6 +175,16 @@ export class MentoQuoteEngine implements QuoteEngine {
     return [...this.pairMap.values()];
   }
 
+  /**
+   * The underlying Mento client, so F-EXEC (remit.ts) can build swaps against
+   * the SAME instance that discovered these routes instead of re-initialising
+   * the SDK. Read-only from this class's point of view: the quote engine never
+   * swaps.
+   */
+  get client(): MentoLike {
+    return this.mento;
+  }
+
   supportedCurrencies(): string[] {
     return [...this.pairMap.keys()];
   }

@@ -12,7 +12,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "vitest run",
-    "register:8004": "tsx scripts/register-8004.ts"
+    "register:8004": "tsx scripts/register-8004.ts",
+    "remit:dryrun": "tsx scripts/remit-dryrun.ts"
   },
   "dependencies": {
     "@celo/attribution-tags": "^0.3.0",

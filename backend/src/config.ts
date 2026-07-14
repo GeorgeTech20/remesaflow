@@ -129,6 +129,29 @@ export const NETWORKS: Record<NetworkName, NetworkProfile> = {
   },
 };
 
+/**
+ * F-EXEC — remittance execution guardrails. This is the only part of the app
+ * that moves real user value, so every limit is opt-in and fails CLOSED:
+ * REMIT_ENABLED must be explicitly "true" or POST /api/remit answers 503.
+ */
+export interface RemitConfig {
+  /** REMIT_ENABLED. Default FALSE — without it the endpoint is a 503. */
+  enabled: boolean;
+  /** REMIT_MAX_USD: max USD per single remittance (default 25). Over => 400. */
+  maxUsd: number;
+  /** REMIT_DAILY_CAP_USD: max USD the agent may send per UTC day (default 100). Over => 429. */
+  dailyCapUsd: number;
+  /**
+   * REMIT_MAX_SLIPPAGE_PCT: max adverse rate move, in percent (default 1).
+   * Used twice: (a) off-chain, to abort if the fresh rate drifted below the
+   * quoted one; (b) on-chain, as the Mento amountOutMin floor.
+   */
+  maxSlippagePct: number;
+}
+
+/** Smallest remittance we will execute (gas would dominate below this). */
+export const REMIT_MIN_USD = 1;
+
 export interface AppConfig {
   network: NetworkProfile;
   port: number;
@@ -148,6 +171,8 @@ export interface AppConfig {
   demoPrivateKey: string | undefined;
   /** QUOTE_ENGINE env: mock | mento | auto (default auto). */
   quoteEngine: QuoteEngineChoice;
+  /** F-EXEC guardrails: real money moves only when every one of these agrees. */
+  remit: RemitConfig;
   corsOrigin: string;
   /** Public backend URL (API_BASE_URL env), no trailing slash. */
   apiBaseUrl: string;
@@ -172,6 +197,75 @@ function isNetworkName(value: string): value is NetworkName {
 
 function isQuoteEngineChoice(value: string): value is QuoteEngineChoice {
   return value === 'mock' || value === 'mento' || value === 'auto';
+}
+
+/**
+ * Strict boolean env: only the literals "true"/"false" are accepted.
+ * An ABSENT or EMPTY value falls back (`FOO=` in a .env means "not set", and
+ * must never crash the boot). Note the fallback for REMIT_ENABLED is false, so
+ * an empty value keeps execution OFF — the safe direction.
+ */
+function parseBool(name: string, raw: string | undefined, fallback: boolean): boolean {
+  if (raw === undefined || raw === '') return fallback;
+  if (raw !== 'true' && raw !== 'false') {
+    throw new ConfigError(`Invalid ${name} "${raw}". Expected "true" or "false".`);
+  }
+  return raw === 'true';
+}
+
+/** Strictly-positive number env, with an upper bound (money limits). */
+function parsePositiveNumber(
+  name: string,
+  raw: string | undefined,
+  fallback: number,
+  max: number,
+): number {
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new ConfigError(`Invalid ${name} "${raw}". Expected a number greater than 0.`);
+  }
+  if (value > max) {
+    throw new ConfigError(`Invalid ${name} "${raw}". Refusing a value above ${max}.`);
+  }
+  return value;
+}
+
+/**
+ * Remittance guardrails. Fails fast on nonsense (negative caps, a per-tx limit
+ * above the daily cap, slippage the Mento SDK would reject) — a config typo
+ * here would move real money.
+ */
+function loadRemitConfig(env: NodeJS.ProcessEnv): RemitConfig {
+  const enabled = parseBool('REMIT_ENABLED', env.REMIT_ENABLED, false);
+  // Hard ceilings (10k / 50k) are a backstop against a fat-fingered env var.
+  const maxUsd = parsePositiveNumber('REMIT_MAX_USD', env.REMIT_MAX_USD, 25, 10_000);
+  const dailyCapUsd = parsePositiveNumber(
+    'REMIT_DAILY_CAP_USD',
+    env.REMIT_DAILY_CAP_USD,
+    100,
+    50_000,
+  );
+  // The Mento SDK itself rejects slippage > 20%.
+  const maxSlippagePct = parsePositiveNumber(
+    'REMIT_MAX_SLIPPAGE_PCT',
+    env.REMIT_MAX_SLIPPAGE_PCT,
+    1,
+    20,
+  );
+
+  if (maxUsd < REMIT_MIN_USD) {
+    throw new ConfigError(
+      `Invalid REMIT_MAX_USD "${maxUsd}": below the ${REMIT_MIN_USD} USD minimum remittance.`,
+    );
+  }
+  if (maxUsd > dailyCapUsd) {
+    throw new ConfigError(
+      `REMIT_MAX_USD (${maxUsd}) is above REMIT_DAILY_CAP_USD (${dailyCapUsd}): a single ` +
+        'remittance could never clear the daily cap. Raise the cap or lower the per-tx limit.',
+    );
+  }
+  return { enabled, maxUsd, dailyCapUsd, maxSlippagePct };
 }
 
 /**
@@ -227,6 +321,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     demoMode: demoRaw === 'true',
     demoPrivateKey: env.DEMO_PRIVATE_KEY || undefined,
     quoteEngine: quoteEngineRaw,
+    remit: loadRemitConfig(env),
     corsOrigin: env.CORS_ORIGIN || '*',
     apiBaseUrl,
     agentRegistrationUrl,
