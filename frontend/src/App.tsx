@@ -10,6 +10,8 @@ import {
   getQuote,
 } from './api';
 import { Lang, dict, getInitialLang, persistLang } from './i18n';
+import { CountrySelect } from './CountrySelect';
+import { Flag } from './Flag';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -251,22 +253,12 @@ export default function App() {
                 />
               </div>
             </label>
-            <label className="block">
-              <span className="mb-1.5 block text-sm font-semibold text-neutral-400">
-                {t.countryLabel}
-              </span>
-              <select
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-                className="w-full appearance-none rounded-xl border border-neutral-700 bg-ink px-4 py-3 text-lg font-bold text-white outline-none transition focus:border-celo"
-              >
-                {currencies.map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {c.flag} {c.country} — {c.code}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <CountrySelect
+              currencies={currencies}
+              value={to}
+              onChange={setTo}
+              label={t.countryLabel}
+            />
             <button
               onClick={handleQuote}
               disabled={loading}
@@ -287,8 +279,8 @@ export default function App() {
       <section ref={resultRef} className="mx-auto w-full max-w-5xl px-4 pt-10">
         {quote && comparison && selected && (
           <div className="fade-up mx-auto max-w-2xl rounded-3xl border border-celo/30 bg-neutral-900/70 p-6 sm:p-10">
-            <p className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-              {t.resultArrives} {selected.flag}
+            <p className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-neutral-400">
+              {t.resultArrives} <Flag code={selected.code} size={18} />
             </p>
             <p className="mt-2 text-4xl font-black text-celo sm:text-6xl">
               {formatLocal(quote.receives, quote.currency, lang)}
