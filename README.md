@@ -75,7 +75,8 @@ Each query costs **$0.01 USD in stablecoin**, paid machine-to-machine over **[x4
              ┌──────────┴──────────┐        ┌──────────┴──────────┐
              │  LANDING            │        │  TELEGRAM BOT       │
              │  React + Vite       │        │  grammY             │
-             │  (browser pays 402) │        │  (bot wallet pays)  │
+             │  (demo: server pays │        │  (bot wallet pays)  │
+             │   x402 for you)     │        │                     │
              └──────────▲──────────┘        └──────────▲──────────┘
                         │                              │
                      humans                    humans & agents
@@ -100,7 +101,7 @@ cd bot      && npm install && npm run dev    # Telegram bot
 
 | Var | What |
 |---|---|
-| `NETWORK` | `alfajores` (testnet, default) or `celo` (mainnet) |
+| `NETWORK` | `celo-sepolia` (testnet, default) or `celo` (mainnet) — Alfajores is deprecated |
 | `AGENT_PRIVATE_KEY` | Agent server wallet — never commit |
 | `BOT_PRIVATE_KEY` | Telegram bot wallet (separate from agent) |
 | `ATTRIBUTION_TAG` | Hackathon attribution tag from celobuilders.xyz |
@@ -116,23 +117,17 @@ Anyone (human or agent) can consume the API. The flow is standard x402:
 ```bash
 curl -i "https://<API_HOST>/api/quote?amount=200&to=KES"
 # HTTP/1.1 402 Payment Required
-# {
-#   "error": "payment_required",
-#   "accepts": [{
-#     "scheme": "exact",
-#     "network": "celo",
-#     "maxAmountRequired": "0.01",
-#     "asset": "<STABLECOIN_ADDRESS>",
-#     "payTo": "<PAYTO_ADDRESS>"
-#   }]
-# }
+# PAYMENT-REQUIRED: <base64 payment requirements — x402 v2>
+#   (decoded: scheme "exact", network eip155:42220, $0.01 USDC, payTo <PAYTO_ADDRESS>)
 ```
 
-**2. Pay $0.01 in stablecoin, retry with the payment header → quote**
+**2. Sign the payment (EIP-3009), retry with the signature header → quote**
+
+The `@x402/fetch` client does this automatically ([bot/src/payment.ts](bot/src/payment.ts) is a working example):
 
 ```bash
 curl "https://<API_HOST>/api/quote?amount=200&to=KES" \
-  -H "X-PAYMENT: <base64-signed-payment-payload>"
+  -H "PAYMENT-SIGNATURE: <base64-signed-payment-payload>"
 # {
 #   "send": 200,
 #   "currency": "KES",

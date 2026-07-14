@@ -37,11 +37,11 @@ export const EXPLORERS: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 export const MOCK_CURRENCIES: Currency[] = [
-  { code: 'KES', name: 'Kenyan Shilling', country: 'Kenya', flag: '🇰🇪', stablecoin: 'cKES' },
-  { code: 'PHP', name: 'Philippine Peso', country: 'Philippines', flag: '🇵🇭', stablecoin: 'PUSO' },
-  { code: 'BRL', name: 'Brazilian Real', country: 'Brazil', flag: '🇧🇷', stablecoin: 'cREAL' },
-  { code: 'COP', name: 'Colombian Peso', country: 'Colombia', flag: '🇨🇴', stablecoin: 'cCOP' },
-  { code: 'NGN', name: 'Nigerian Naira', country: 'Nigeria', flag: '🇳🇬', stablecoin: 'cNGN' },
+  { code: 'KES', name: 'Kenyan Shilling', country: 'Kenya', flag: '🇰🇪', stablecoin: 'KESm' },
+  { code: 'PHP', name: 'Philippine Peso', country: 'Philippines', flag: '🇵🇭', stablecoin: 'PHPm' },
+  { code: 'BRL', name: 'Brazilian Real', country: 'Brazil', flag: '🇧🇷', stablecoin: 'BRLm' },
+  { code: 'COP', name: 'Colombian Peso', country: 'Colombia', flag: '🇨🇴', stablecoin: 'COPm' },
+  { code: 'NGN', name: 'Nigerian Naira', country: 'Nigeria', flag: '🇳🇬', stablecoin: 'NGNm' },
 ];
 
 const MOCK_RATES: Record<string, number> = {
