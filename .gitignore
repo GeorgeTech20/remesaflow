@@ -10,3 +10,10 @@ logs/
 coverage/
 .vercel/
 .railway/
+
+# Documentos internos — NO publicar (estrategia, research, materiales de growth)
+research/
+growth/
+PLAN_HACKATHON.md
+ACCION_HUMANA_REQUERIDA.md
+MANUAL_REGISTRO.md
