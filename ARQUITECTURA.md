@@ -52,12 +52,12 @@ Implicaciones duras:
 
 ### 1.3 Formato del flujo (x402 v2, scheme `exact`)
 
-1. Cliente hace `GET /api/quote` sin pago → servidor responde **HTTP 402** con JSON de requisitos:
+1. Cliente hace `GET /api/quote` sin pago → servidor responde **HTTP 402** con header **`PAYMENT-REQUIRED`** (base64) + JSON de requisitos:
 
 ```json
 {
   "x402Version": 2,
-  "error": "X-PAYMENT header is required",
+  "error": "Payment required",
   "accepts": [{
     "scheme": "exact",
     "network": "eip155:42220",
@@ -74,10 +74,10 @@ Implicaciones duras:
 ```
 (`maxAmountRequired` en unidades base del asset: USDC = 6 decimales, `"10000"` = $0.01. Estructura según spec x402 de coinbase/x402; los nombres `paymentPayload`/`paymentRequirements` confirmados contra `/verify` del facilitador.)
 
-2. Cliente firma autorización EIP-3009 (`transferWithAuthorization`) del asset y reintenta con header **`X-PAYMENT`** (payload JSON base64). El skill también acepta `PAYMENT-SIGNATURE` como alias en la variante thirdweb.
+2. Cliente firma autorización EIP-3009 (`transferWithAuthorization`) del asset y reintenta con header **`PAYMENT-SIGNATURE`** (payload JSON base64). **CORREGIDO 2026-07-14 (verificado en @x402/core@2.18.0 instalado):** `PAYMENT-SIGNATURE` es el header v2; `X-PAYMENT` es v1 (el server `@x402/hono` lo acepta como fallback de compatibilidad, pero los clientes v2 como `@x402/fetch` mandan `PAYMENT-SIGNATURE`).
 3. Servidor → `POST https://api.x402.celo.org/verify` con `{paymentPayload, paymentRequirements}` → `{"isValid":true, "payer":"0x..."}`.
 4. Servidor ejecuta la lógica, luego `POST /settle` (con `X-API-Key`) → el facilitador manda la tx on-chain.
-5. Respuesta 200 con header **`X-PAYMENT-RESPONSE`** (receipt base64) — el middleware `@x402/hono` hace 402/verify/settle/headers solo.
+5. Respuesta 200 con header **`PAYMENT-RESPONSE`** (receipt base64; en v1 era `X-PAYMENT-RESPONSE` — los clientes v2 leen ambos) — el middleware `@x402/hono` hace 402/verify/settle/headers solo.
 
 ### 1.4 Middleware Hono (esqueleto de referencia, del README oficial de `@x402/hono@2.18.0`)
 

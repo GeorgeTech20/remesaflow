@@ -1,6 +1,7 @@
 /**
- * Quote engine. The MockQuoteEngine sits behind the QuoteEngine interface so
- * ARQUI can swap in a real Mento-based implementation without touching routes.
+ * Quote engine. The MockQuoteEngine sits behind the QuoteEngine interface;
+ * MentoQuoteEngine (quote-mento.ts) implements the same interface with
+ * on-chain rates. Both share the exact same comparison formula (buildQuote).
  */
 
 export interface Quote {
@@ -17,6 +18,8 @@ export interface Quote {
 
 export interface QuoteEngine {
   getQuote(amountUSD: number, target: string): Promise<Quote>;
+  /** Engines with on-chain discovery expose only pairs with a real route. */
+  supportedCurrencies?(): string[];
 }
 
 export interface CurrencyInfo {
@@ -27,13 +30,14 @@ export interface CurrencyInfo {
   stablecoin: string;
 }
 
-// NOTE(ARQUI): confirm real Mento stablecoin symbols (esp. PUSO vs cPHP).
+// Current Mento naming: `m` suffix (KESm, PHPm, ...) — the old cKES/PUSO/cREAL
+// names are the same contracts renamed (ARQUITECTURA §2.3).
 export const CURRENCIES: CurrencyInfo[] = [
-  { code: 'KES', name: 'Kenyan Shilling', country: 'Kenya', flag: '🇰🇪', stablecoin: 'cKES' },
-  { code: 'PHP', name: 'Philippine Peso', country: 'Philippines', flag: '🇵🇭', stablecoin: 'PUSO' },
-  { code: 'BRL', name: 'Brazilian Real', country: 'Brazil', flag: '🇧🇷', stablecoin: 'cREAL' },
-  { code: 'COP', name: 'Colombian Peso', country: 'Colombia', flag: '🇨🇴', stablecoin: 'cCOP' },
-  { code: 'NGN', name: 'Nigerian Naira', country: 'Nigeria', flag: '🇳🇬', stablecoin: 'cNGN' },
+  { code: 'KES', name: 'Kenyan Shilling', country: 'Kenya', flag: '🇰🇪', stablecoin: 'KESm' },
+  { code: 'PHP', name: 'Philippine Peso', country: 'Philippines', flag: '🇵🇭', stablecoin: 'PHPm' },
+  { code: 'BRL', name: 'Brazilian Real', country: 'Brazil', flag: '🇧🇷', stablecoin: 'BRLm' },
+  { code: 'COP', name: 'Colombian Peso', country: 'Colombia', flag: '🇨🇴', stablecoin: 'COPm' },
+  { code: 'NGN', name: 'Nigerian Naira', country: 'Nigeria', flag: '🇳🇬', stablecoin: 'NGNm' },
 ];
 
 /** Mid-market mock rates (approx. July 2026), USD -> target. */
@@ -47,14 +51,34 @@ const BASE_RATES: Record<string, number> = {
 
 export const SUPPORTED_CURRENCIES: string[] = Object.keys(BASE_RATES);
 
-/** Flat mock on-chain fee in USD. */
-const CELO_FEE_USD = 0.02;
+/** Flat estimated on-chain fee in USD (CIP-64 tx paid in USDC is ~<$0.01;
+ * we keep a conservative 2-cent estimate for the comparison). */
+export const CELO_FEE_USD = 0.02;
 /** Western Union: ~6% of the sent amount. */
-const WU_FEE_PCT = 0.06;
+export const WU_FEE_PCT = 0.06;
 /** Wise: ~1.5% of the sent amount. */
-const WISE_FEE_PCT = 0.015;
+export const WISE_FEE_PCT = 0.015;
 
-const round2 = (n: number): number => Math.round(n * 100) / 100;
+export const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+/**
+ * Shared quote formula: given a USD->target rate, computes receives + the
+ * Western Union / Wise comparison. Used by both mock and Mento engines.
+ */
+export function buildQuote(amountUSD: number, currency: string, rate: number): Quote {
+  const wuWouldCharge = round2(amountUSD * WU_FEE_PCT);
+  return {
+    send: amountUSD,
+    currency,
+    receives: round2(amountUSD * rate),
+    rate,
+    celoFee: CELO_FEE_USD,
+    wuWouldCharge,
+    wiseWouldCharge: round2(amountUSD * WISE_FEE_PCT),
+    savings: round2(wuWouldCharge - CELO_FEE_USD),
+    timestamp: new Date().toISOString(),
+  };
+}
 
 export class UnsupportedPairError extends Error {
   readonly code = 'UNSUPPORTED_PAIR';
@@ -77,20 +101,12 @@ export class MockQuoteEngine implements QuoteEngine {
 
   constructor(private readonly cacheTtlMs = 60_000) {}
 
+  supportedCurrencies(): string[] {
+    return [...SUPPORTED_CURRENCIES];
+  }
+
   async getQuote(amountUSD: number, target: string): Promise<Quote> {
-    const rate = this.getRate(target);
-    const wuWouldCharge = round2(amountUSD * WU_FEE_PCT);
-    return {
-      send: amountUSD,
-      currency: target,
-      receives: round2(amountUSD * rate),
-      rate,
-      celoFee: CELO_FEE_USD,
-      wuWouldCharge,
-      wiseWouldCharge: round2(amountUSD * WISE_FEE_PCT),
-      savings: round2(wuWouldCharge - CELO_FEE_USD),
-      timestamp: new Date().toISOString(),
-    };
+    return buildQuote(amountUSD, target, this.getRate(target));
   }
 
   /** Rate per pair is cached for cacheTtlMs (60s by default). */

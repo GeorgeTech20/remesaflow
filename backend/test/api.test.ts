@@ -1,15 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
-import { type AppConfig, loadConfig } from '../src/config.js';
+import { type Address, type AppConfig, loadConfig } from '../src/config.js';
 import type { QueryLog } from '../src/logger.js';
+import { createAgentWallet, type MinimalWalletClient } from '../src/wallet.js';
 
 const silentLog: QueryLog = { log: () => {} };
 
-/** Fresh app per test with defaults (alfajores, x402 off) + optional overrides. */
+/** Fresh app per test with defaults (celo-sepolia, x402 off) + optional overrides. */
 function testApp(overrides: Partial<AppConfig> = {}) {
   const config: AppConfig = { ...loadConfig({}), ...overrides };
   return createApp({ config, queryLog: silentLog });
 }
+
+// Fake signer so tests never touch a real private key or the network.
+const AGENT_ADDRESS: Address = '0x1111111111111111111111111111111111111111';
+const stubWalletClient: MinimalWalletClient = {
+  account: { address: AGENT_ADDRESS },
+  sendTransaction: async () => '0x00',
+};
 
 describe('GET /api/currencies', () => {
   it('returns the supported currency list', async () => {
@@ -18,7 +26,7 @@ describe('GET /api/currencies', () => {
     expect(res.status).toBe(200);
 
     const body = await res.json();
-    expect(body.network).toBe('alfajores');
+    expect(body.network).toBe('celo-sepolia');
     expect(body.currencies).toHaveLength(5);
     const codes = body.currencies.map((c: { code: string }) => c.code);
     expect(codes).toEqual(expect.arrayContaining(['KES', 'PHP', 'BRL', 'COP', 'NGN']));
@@ -102,31 +110,55 @@ describe('rate limiting', () => {
   });
 });
 
-describe('x402 stub', () => {
-  it('returns 402 on the paid endpoint when X402_ENABLED=true', async () => {
-    const app = testApp({ x402Enabled: true });
+describe('x402 middleware (real, @x402/hono v2)', () => {
+  function paidApp() {
+    const config: AppConfig = { ...loadConfig({}), x402Enabled: true };
+    const agentWallet = createAgentWallet(config, { walletClient: stubWalletClient });
+    return createApp({ config, queryLog: silentLog, agentWallet });
+  }
+
+  it('returns 402 with a PAYMENT-REQUIRED header (v2) on the paid endpoint', async () => {
+    const app = paidApp();
     const res = await app.request('/api/quote?amount=50&to=KES');
     expect(res.status).toBe(402);
-    const body = await res.json();
-    expect(body.error).toBe('payment_required');
+
+    const header = res.headers.get('PAYMENT-REQUIRED');
+    expect(header).toBeTruthy();
+    const decoded = JSON.parse(Buffer.from(header as string, 'base64').toString('utf8'));
+    expect(decoded.x402Version).toBe(2);
+    const accepts = decoded.accepts;
+    expect(Array.isArray(accepts)).toBe(true);
+    expect(accepts[0]).toMatchObject({
+      scheme: 'exact',
+      network: 'eip155:11142220',
+      payTo: AGENT_ADDRESS,
+      amount: '10000', // $0.01 USDC (6 decimals)
+    });
   });
 
   it('keeps free endpoints open when X402_ENABLED=true', async () => {
-    const app = testApp({ x402Enabled: true });
+    const config: AppConfig = { ...loadConfig({}), x402Enabled: true };
+    const agentWallet = createAgentWallet(config, { walletClient: stubWalletClient });
+    const app = createApp({ config, queryLog: silentLog, agentWallet });
     const res = await app.request('/api/currencies');
     expect(res.status).toBe(200);
+  });
+
+  it('refuses to enable x402 without an agent wallet (payTo unknown)', () => {
+    const config: AppConfig = { ...loadConfig({}), x402Enabled: true };
+    expect(() => createApp({ config, queryLog: silentLog })).toThrow(/AGENT_PRIVATE_KEY/);
   });
 });
 
 describe('GET /api/health', () => {
-  it('reports mock mode and network', async () => {
+  it('reports engine mode and network', async () => {
     const app = testApp();
     const res = await app.request('/api/health');
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({
       status: 'ok',
-      network: 'alfajores',
+      network: 'celo-sepolia',
       blockNumber: null,
       mode: 'mock',
     });
