@@ -63,7 +63,7 @@ export function assertConfig(): void {
         "  1. Create the bot with @BotFather on Telegram.",
         "  2. Paste the token into the root .env file (TELEGRAM_BOT_TOKEN=...).",
         "",
-        "See ACCION_HUMANA_REQUERIDA.md (item 3) at the repo root.",
+        "Create one with @BotFather on Telegram and set it in the root .env.",
       ].join("\n"),
     );
     process.exit(1);

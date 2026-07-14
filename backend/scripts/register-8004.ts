@@ -147,7 +147,7 @@ async function main(): Promise<void> {
 
   if (!execute) {
     console.log('[dry-run] No transaction was signed or sent.');
-    console.log('[dry-run] After funding the agent wallet (see ACCION_HUMANA_REQUERIDA.md), run:');
+    console.log('[dry-run] After funding the agent wallet, run:');
     console.log('[dry-run]   cd backend && npm run register:8004 -- --execute');
     return;
   }
@@ -178,7 +178,7 @@ async function main(): Promise<void> {
   console.log(`[execute]   agentId:  ${agentId ?? 'not found in logs — check the explorer'}`);
   console.log(`[execute]   tx:       ${config.network.explorer}/tx/${hash}`);
   console.log(`[execute]   registry: ${config.network.explorer}/address/${registry}`);
-  console.log('[execute] NEXT: paste the tx link into growth/tweet.md (the tweet must include the ERC-8004 link).');
+  console.log('[execute] NEXT: the agent link is https://8004scan.io/agents/celo/<AGENT_ID>');
 }
 
 main().catch((err) => {

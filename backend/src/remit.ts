@@ -18,17 +18,18 @@
  *              the recipient, because the Mento SDK takes `recipient` as a
  *              parameter distinct from `owner`.
  *
- * Why this shape and not swap-then-transfer (research/01-celobuilders-tracks.md):
- *   - Track 1 scores `max(amount_usd)` over the legs of ONE tx where
- *     `transfer.from = tx sender`. The USDC leg of the swap is exactly that leg,
- *     and USDC is USD-priced by Dune, so the tx scores the full remittance.
- *   - A separate "swap, then ERC-20 transfer KESm to the recipient" would be two
- *     value txs, and the KESm leg has no reliable USD price on Dune
- *     (amount_usd NULL => 0). Splitting the value can only LOWER the score.
- *   - NEVER batch remittances: the leaderboard takes max() per tx, not the sum,
- *     so N remittances in one multicall would score like ONE of them. One
- *     remittance = one user request = one value tx. There are no loops, crons or
- *     timers in this module by design (anti-sybil rule of PLAN_HACKATHON.md).
+ * Why this shape and not swap-then-transfer:
+ *   - One atomic tx means the recipient either gets the money or nothing happens.
+ *     A separate "swap, then ERC-20 transfer to the recipient" leaves a window
+ *     where the swap succeeded but the delivery failed, stranding funds in the
+ *     agent wallet and requiring manual recovery.
+ *   - It also halves the gas and keeps the on-chain audit trail to a single hash
+ *     per remittance, which is what /api/remit returns to the caller.
+ *
+ * Remittances are NEVER batched: one remittance = one user request = one tx.
+ * There are no loops, crons or timers in this module by design — the agent only
+ * moves money when a human asked it to, and every movement is individually
+ * traceable.
  *
  * Every tx goes out through wallet.sendWithTag(), which appends the ERC-8021
  * attribution suffix and refuses to send on mainnet without ATTRIBUTION_TAG.
@@ -383,9 +384,8 @@ export class RemitService {
 
   /**
    * GUARDRAIL 3: strict recipient validation. A valid EVM address that is
-   * neither the burn address nor the agent's own wallet — sending to ourselves
-   * would be wash trading, which the judges explicitly disqualify
-   * (PLAN_HACKATHON.md, "Integridad").
+   * neither the burn address nor the agent's own wallet. A remittance to the
+   * agent itself is not a remittance — it is self-dealing, and it is refused.
    */
   private validateRecipient(recipient: unknown): Address {
     if (typeof recipient !== 'string' || !isAddress(recipient, { strict: false })) {

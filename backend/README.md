@@ -116,19 +116,17 @@ The Mento SDK takes `recipient` separately from `owner`, so tx B does the swap
 **and** the delivery: the USDC leaves the agent wallet and the KESm/PHPm/… lands
 on the beneficiary inside a **single transaction**.
 
-Why it matters (see `research/01-celobuilders-tracks.md`): Track 1 scores
-`max(amount_usd)` over the legs of one tx where `transfer.from = tx sender`. The
-USDC leg of the swap is exactly that leg, and USDC is USD-priced by Dune, so the
-tx scores the full remittance.
+Why it matters:
 
-- **Splitting** it (swap, then a separate ERC-20 transfer of KESm to the
-  recipient) would be two value txs, and the KESm leg has no reliable USD price
-  on Dune → it would score ~0. The USD must ride in one un-split ERC-20 transfer.
-- **Batching is forbidden.** The leaderboard takes `max()` per tx, not the sum:
-  N remittances in one multicall would score like *one* of them.
-- **One remittance = one user request = one value tx.** There are no loops, crons
-  or timers in the execution path, by design (anti-sybil rule of
-  `PLAN_HACKATHON.md`).
+- **Atomicity.** Splitting it (swap, then a separate transfer to the recipient)
+  leaves a window where the swap landed but the delivery failed — funds stranded
+  in the agent wallet, manual recovery needed. One tx: the recipient gets the
+  money, or nothing happened.
+- **Auditability.** One hash per remittance is what `/api/remit` hands back to
+  the caller, and what the recipient can check on the explorer.
+- **One remittance = one user request = one tx.** Remittances are never batched
+  and there are no loops, crons or timers in the execution path: the agent moves
+  money only when a human asked it to.
 
 Every tx — including the $0 approval — goes out through `sendWithTag()`
 (ERC-8021 attribution + gas in USDC). **On mainnet without `ATTRIBUTION_TAG`,

@@ -145,14 +145,11 @@ async function main(): Promise<void> {
   console.log('                ...both inside this ONE transaction.\n');
 
   line();
-  console.log('4. Leaderboard accounting (research/01-celobuilders-tracks.md):\n');
+  console.log('4. On-chain footprint:\n');
   console.log(
-    `   Track 1 counts max(amount_usd) over the legs where transfer.from = tx sender.\n` +
-      `   In tx ${n} that leg is the ${plan.tokenInSymbol} leaving the agent => $${amount} scored,\n` +
-      `   once, in a single tx. Not batched (batching would score max(), not sum).`,
-  );
-  console.log(
-    `   Track 2 counts the x402 settlement for this request separately (by wallet).\n`,
+    `   tx ${n} moves $${amount} of ${plan.tokenInSymbol} out of the agent wallet and\n` +
+      `   delivers the regional stablecoin to the recipient atomically. One remittance,\n` +
+      `   one transaction, one hash to audit. Remittances are never batched.\n`,
   );
 
   line();

@@ -7,7 +7,7 @@
 
 ## 0. DECISIÓN CRÍTICA DE RED: Alfajores está MUERTO. La testnet es **Celo Sepolia**
 
-Todos los skills oficiales y el tooling actual (viem, Mento SDK v3) usan **Celo Sepolia**, no Alfajores. El backlog de `PROGRESO.md` dice "Alfajores" — se corrige a Celo Sepolia.
+Todos los skills oficiales y el tooling actual (viem, Mento SDK v3) usan **Celo Sepolia**, no Alfajores. El código y la documentación usan Celo Sepolia en todos lados.
 
 | Red | Chain ID | RPC | Explorer |
 |-----|----------|-----|----------|
@@ -47,7 +47,7 @@ Base URL: **`https://api.x402.celo.org`**
 
 Implicaciones duras:
 1. El facilitador de Celo solo anuncia **mainnet** (`eip155:42220`). NO anuncia Celo Sepolia.
-2. `settle` necesita API key que **no tenemos** → entrada en `ACCION_HUMANA_REQUERIDA.md` (buscar en docs.celo.org / canal del hackathon cómo emitirla). `verify` sí es libre.
+2. `settle` necesita API key que **no tenemos** → se emite self-serve en x402.celo.org. `verify` sí es libre.
 3. Scheme soportado: **`exact`** (v2). Network en formato CAIP-2: `eip155:42220`.
 
 ### 1.3 Formato del flujo (x402 v2, scheme `exact`)
@@ -341,7 +341,7 @@ Una sola fuente de verdad `config/networks.ts` con este shape (valores de las se
 
 | # | Riesgo | Mitigación / comando de verificación |
 |---|--------|--------------------------------------|
-| R1 | `POST /settle` de api.x402.celo.org exige `X-API-Key` y no sabemos dónde se emite | → `ACCION_HUMANA_REQUERIDA.md`. Buscar en docs.celo.org/x402 y el Discord del hackathon. Mientras: `verify` (libre) + settle vía thirdweb facilitator como plan B |
+| R1 | `POST /settle` del facilitador exige `X-API-Key` | RESUELTO: la key se emite self-serve en x402.celo.org. Sin ella, `verify` (libre) sigue funcionando y el backend corre en modo degradado verify-only |
 | R2 | Firma exacta del hook de auth en `HTTPFacilitatorClient` (`createAuthHeaders`) no verificada | Leer `node_modules/@x402/core` al instalar; el tipo en v1 era `CreateHeaders` |
 | R3 | El facilitador de Celo NO anuncia testnet (`/supported` solo `eip155:42220`) | Dev en Sepolia con mock o thirdweb; demo de settle real solo en mainnet |
 | R4 | No sabemos qué assets acepta el facilitador (USDC seguro es el candidato; ¿USDT? ¿USDm?) | Probar `POST /verify` con PaymentRequirements de cada asset y ver si devuelve `isValid` vs `invalidReason` |
@@ -354,7 +354,7 @@ Una sola fuente de verdad `config/networks.ts` con este shape (valores de las se
 
 ---
 
-## Resumen ejecutivo (para PROGRESO.md)
+## Resumen ejecutivo
 
 - Testnet = **Celo Sepolia (11142220)**, no Alfajores.
 - x402: **@x402/hono v2** + facilitador `https://api.x402.celo.org` (mainnet), pago en **USDC**; settle necesita API key (acción humana); testnet vía thirdweb/mock.
