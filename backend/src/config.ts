@@ -62,10 +62,11 @@ export interface NetworkProfile {
   erc8004: Erc8004Info;
 }
 
-// The Celo facilitator only announces mainnet (eip155:42220). We still carry
-// the URL for testnet so verify-only experiments are possible; settle on
-// testnet is expected to be rejected (ARQUITECTURA §1.2 / R3).
-const X402_FACILITATOR_URL = 'https://api.x402.celo.org';
+// Celo runs a separate facilitator per network. Testnet settlements DO work
+// here, but Dune has no Celo Sepolia dataset, so they can never appear on the
+// hackathon leaderboard — Sepolia is for dev/QA, mainnet is what counts.
+const X402_FACILITATOR_MAINNET = 'https://api.x402.celo.org';
+const X402_FACILITATOR_SEPOLIA = 'https://api.x402.sepolia.celo.org';
 
 export const NETWORKS: Record<NetworkName, NetworkProfile> = {
   'celo-sepolia': {
@@ -94,7 +95,7 @@ export const NETWORKS: Record<NetworkName, NetworkProfile> = {
       NGNm: '0x3d5ae86F34E2a82771496D140daFAEf3789dF888',
       BRLm: '0x2294298942fdc79417DE9E0D740A4957E0e7783a',
     },
-    x402: { facilitatorUrl: X402_FACILITATOR_URL, network: 'eip155:11142220' },
+    x402: { facilitatorUrl: X402_FACILITATOR_SEPOLIA, network: 'eip155:11142220' },
     erc8004: {
       identityRegistry: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
       reputationRegistry: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
@@ -120,7 +121,7 @@ export const NETWORKS: Record<NetworkName, NetworkProfile> = {
       NGNm: '0xE2702Bd97ee33c88c8f6f92DA3B733608aa76F71',
       BRLm: '0xe8537a3d056da446677b9e9d6c5db704eaab4787',
     },
-    x402: { facilitatorUrl: X402_FACILITATOR_URL, network: 'eip155:42220' },
+    x402: { facilitatorUrl: X402_FACILITATOR_MAINNET, network: 'eip155:42220' },
     erc8004: {
       identityRegistry: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
       reputationRegistry: '0x8004BAa17C55a88189AE136b182e5fdA19dE9b63',
