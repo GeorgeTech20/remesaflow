@@ -158,7 +158,7 @@ Three things the official docs and skills got wrong, which we verified on-chain 
 2. **The Sepolia USDC addresses published in the skills don't exist.** The token has no code and the adapter reverts with *"Currency not in the directory"*. Real values read from the `FeeCurrencyDirectory`: token `0x01C5C012…`, adapter `0xbf1441Ea…`.
 3. **x402 v2 uses `PAYMENT-REQUIRED` / `PAYMENT-SIGNATURE` headers**, not v1's `X-PAYMENT`. Celo also runs a **separate facilitator per network** (`api.x402.sepolia.celo.org` for testnet).
 
-Test coverage: **90 backend tests + 5 bot tests**, all green. On-chain integration tests are gated behind `RUN_ONCHAIN_TESTS=1` so CI stays green offline. Architecture decisions are documented in [ARQUITECTURA.md](ARQUITECTURA.md); the pre-flight audit is in [QA_REPORT.md](QA_REPORT.md).
+Test coverage: **90 backend tests + 5 bot tests**, all green. On-chain integration tests are gated behind `RUN_ONCHAIN_TESTS=1` so CI stays green offline. Architecture decisions — every address, package and trade-off — are documented in [ARQUITECTURA.md](ARQUITECTURA.md).
 
 ## Links
 
