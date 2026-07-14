@@ -63,8 +63,7 @@ export interface NetworkProfile {
 }
 
 // Celo runs a separate facilitator per network. Testnet settlements DO work
-// here, but Dune has no Celo Sepolia dataset, so they can never appear on the
-// hackathon leaderboard — Sepolia is for dev/QA, mainnet is what counts.
+// here. Sepolia is for development and QA; mainnet is where real value moves.
 const X402_FACILITATOR_MAINNET = 'https://api.x402.celo.org';
 const X402_FACILITATOR_SEPOLIA = 'https://api.x402.sepolia.celo.org';
 

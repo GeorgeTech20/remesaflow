@@ -9,7 +9,7 @@
  *
  *   tx A (conditional, $0 of value): ERC-20 `approve` USDC -> Mento Router.
  *          Sent only when the current allowance cannot cover amountIn. It moves
- *          no tokens, so it contributes 0 to the leaderboard's volume.
+ *          no tokens; it only grants the router an allowance.
  *
  *   tx B (ALWAYS, carries the FULL USD amount): Mento Router
  *          `swapExactTokensForTokens(..., recipient)`. Inside this single tx:

@@ -212,7 +212,7 @@ async function expectRemitError(promise: Promise<unknown>, code: string, status:
 }
 
 // ---------------------------------------------------------------------------
-// The transaction design — the thing the leaderboard actually scores.
+// The transaction design — one atomic value-bearing tx per remittance.
 // ---------------------------------------------------------------------------
 
 describe('remit tx design (ONE value tx, never batched)', () => {

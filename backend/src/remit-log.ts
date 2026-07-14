@@ -29,7 +29,7 @@ export type RemitStatus = 'success' | 'pending' | 'failed';
 
 export interface RemitLogEntry {
   timestamp: string;
-  /** USD amount sent (the value that counts for Track 1). */
+  /** USD amount sent. */
   amount: number;
   /** e.g. "USD-KES". */
   corridor: string;
