@@ -387,14 +387,11 @@ export default function App() {
             <p className="mt-1 text-sm text-neutral-500">{t.footerTagline}</p>
           </div>
           <nav className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-neutral-400">
-            <a href="https://github.com" className="transition hover:text-celo">
+            <a
+              href="https://github.com/GeorgeTech20/remesaflow"
+              className="transition hover:text-celo"
+            >
               {t.footerGithub}
-            </a>
-            <a href="https://t.me" className="transition hover:text-celo">
-              {t.footerTelegram}
-            </a>
-            <a href="#" className="transition hover:text-celo">
-              {t.footerErc}
             </a>
           </nav>
           <span className="rounded-full border border-celo/40 bg-celo/10 px-4 py-1.5 text-xs font-bold text-celo">
