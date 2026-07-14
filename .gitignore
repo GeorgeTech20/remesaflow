@@ -19,3 +19,6 @@ ACCION_HUMANA_REQUERIDA.md
 MANUAL_REGISTRO.md
 QA_REPORT.md
 PROGRESO.md
+
+.vercel
+.env*.local
